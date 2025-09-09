@@ -1,6 +1,7 @@
-// app/api/archive/route.ts - TYPESCRIPT FIXED VERSION
+// app/api/archive/route.ts - NAPRAWIONY dla Decimal
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/utils/prisma'
+import { Decimal } from '@prisma/client/runtime/library'
 
 const USER_ID = 'default-user'
 
@@ -27,25 +28,19 @@ interface TransactionData {
     category: string
 }
 
+// Funkcja pomocnicza do konwersji Decimal na number
+function decimalToNumber(decimal: Decimal | number): number {
+    if (typeof decimal === 'number') return decimal
+    return decimal.toNumber()
+}
+
 export async function GET() {
     try {
-        // Pobierz wszystkie transakcje (WYKLUCZAJĄC transfery przy zamykaniu miesiąca)
+        // Pobierz wszystkie transakcje
         const allTransactions = await prisma.transaction.findMany({
             where: {
                 userId: USER_ID,
-                type: { in: ['income', 'expense'] },
-                NOT: [
-                    {
-                        description: {
-                            contains: 'Zamknięcie miesiąca'
-                        }
-                    },
-                    {
-                        description: {
-                            contains: 'przeniesienie bilansu'
-                        }
-                    }
-                ]
+                type: { in: ['income', 'expense'] }
             },
             include: {
                 envelope: true
@@ -95,11 +90,13 @@ export async function GET() {
                 }
             }
 
+            const amount = decimalToNumber(transaction.amount) // KONWERSJA Decimal → number
+
             // Dodaj transakcję do miesiąca
             const transactionData: TransactionData = {
                 id: transaction.id,
                 type: transaction.type,
-                amount: transaction.amount,
+                amount: amount, // KONWERTOWANA wartość
                 description: transaction.description || 'Brak opisu',
                 date: transaction.date.toISOString(),
                 envelope: transaction.envelope ? {
@@ -113,15 +110,15 @@ export async function GET() {
 
             // Aktualizuj sumy
             if (transaction.type === 'income') {
-                monthData.income += transaction.amount
+                monthData.income += amount
             } else if (transaction.type === 'expense') {
-                monthData.expenses += transaction.amount
+                monthData.expenses += amount
 
                 // Grupuj wydatki po kategoriach
                 if (!monthData.categories[categoryName]) {
                     monthData.categories[categoryName] = 0
                 }
-                monthData.categories[categoryName] += transaction.amount
+                monthData.categories[categoryName] += amount
             }
         }
 
