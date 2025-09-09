@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-provider = "postgresql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -27,8 +27,8 @@ model Envelope {
   name          String
   icon          String?
   type          String // 'monthly' lub 'yearly'
-  plannedAmount Decimal
-  currentAmount Decimal
+  plannedAmount Decimal       // ZMIENIONE: Int → Decimal
+  currentAmount Decimal       // ZMIENIONE: Int → Decimal
   transactions  Transaction[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -39,13 +39,13 @@ model Transaction {
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        String // 'income', 'expense', 'transfer'
-  amount Decimal
+  amount      Decimal   // ZMIENIONE: Int → Decimal
   description String?
   date        DateTime
   envelopeId  String?
   envelope    Envelope? @relation(fields: [envelopeId], references: [id])
   category    String?  // ID kategorii
-  editHistory String?   @default("") // NAPRAWIONE: String zamiast Json
+  editHistory String?   @default("")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }
