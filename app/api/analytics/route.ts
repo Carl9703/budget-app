@@ -1,6 +1,7 @@
-// app/api/analytics/route.ts
+// app/api/analytics/route.ts - NAPRAWIONY dla Decimal
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/utils/prisma'
+import { Decimal } from '@prisma/client/runtime/library'
 
 const USER_ID = 'default-user'
 
@@ -11,6 +12,12 @@ interface MonthlyData {
     expenses: number
     savings: number
     categories: { [key: string]: number }
+}
+
+// Funkcja pomocnicza do konwersji Decimal na number
+function decimalToNumber(decimal: Decimal | number): number {
+    if (typeof decimal === 'number') return decimal
+    return decimal.toNumber()
 }
 
 export async function GET() {
@@ -58,11 +65,12 @@ export async function GET() {
             }
 
             const month = monthlyData[monthKey]
+            const amount = decimalToNumber(transaction.amount) // Konwersja Decimal → number
 
             if (transaction.type === 'income') {
-                month.income += transaction.amount
+                month.income += amount
             } else {
-                month.expenses += transaction.amount
+                month.expenses += amount
 
                 // Kategoryzacja wydatków
                 let category = 'Inne'
@@ -78,7 +86,7 @@ export async function GET() {
                 if (!month.categories[category]) {
                     month.categories[category] = 0
                 }
-                month.categories[category] += transaction.amount
+                month.categories[category] += amount
             }
         }
 
@@ -111,26 +119,26 @@ export async function GET() {
         // === ANALIZA KOPERT ===
         const monthlyEnvelopes = envelopes.filter(e => e.type === 'monthly')
         const envelopeAnalysis = monthlyEnvelopes.map(envelope => {
-            // Policz ile razy przekroczono budżet
             let overrunCount = 0
             let totalMonths = 0
             let totalSpent = 0
 
-            // Symulacja - w rzeczywistości trzeba by śledzić historię kopert
+            const plannedAmount = decimalToNumber(envelope.plannedAmount)
+
             sortedMonths.forEach((month: MonthlyData) => {
                 const spent = month.categories[envelope.name] || 0
-                if (spent > envelope.plannedAmount) overrunCount++
+                if (spent > plannedAmount) overrunCount++
                 if (spent > 0) totalMonths++
                 totalSpent += spent
             })
 
-            const efficiency = totalMonths > 0 ? Math.round((totalSpent / (envelope.plannedAmount * totalMonths)) * 100) : 0
+            const efficiency = totalMonths > 0 ? Math.round((totalSpent / (plannedAmount * totalMonths)) * 100) : 0
             const overrunRate = totalMonths > 0 ? Math.round((overrunCount / totalMonths) * 100) : 0
 
             return {
                 name: envelope.name,
                 icon: envelope.icon,
-                plannedAmount: envelope.plannedAmount,
+                plannedAmount,
                 efficiency,
                 overrunRate,
                 totalSpent,
@@ -141,15 +149,13 @@ export async function GET() {
         // === CELE I PROGNOZY ===
         const yearlyEnvelopes = envelopes.filter(e => e.type === 'yearly' && !e.name.includes('Wolne środki'))
         const goalAnalysis = yearlyEnvelopes.map(envelope => {
-            const currentAmount = envelope.currentAmount
-            const targetAmount = envelope.plannedAmount
+            const currentAmount = decimalToNumber(envelope.currentAmount)
+            const targetAmount = decimalToNumber(envelope.plannedAmount)
             const progress = Math.round((currentAmount / targetAmount) * 100)
 
-            // Średni miesięczny wkład (oszacowanie)
             const monthsWithData = Math.max(sortedMonths.length, 1)
             const avgMonthlyContribution = currentAmount / monthsWithData
 
-            // Prognoza miesięcy do celu
             const remaining = targetAmount - currentAmount
             const monthsToGoal = avgMonthlyContribution > 0 ? Math.ceil(remaining / avgMonthlyContribution) : Infinity
 
