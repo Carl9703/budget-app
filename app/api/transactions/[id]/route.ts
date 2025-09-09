@@ -1,8 +1,15 @@
-// app/api/transactions/[id]/route.ts - NAPRAWIONY dla Next.js 15
+// app/api/transactions/[id]/route.ts - NAPRAWIONY dla Decimal
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/utils/prisma'
+import { Decimal } from '@prisma/client/runtime/library'
 
 const USER_ID = 'default-user'
+
+// Funkcja pomocnicza do konwersji Decimal na number
+function decimalToNumber(decimal: Decimal | number): number {
+    if (typeof decimal === 'number') return decimal
+    return decimal.toNumber()
+}
 
 // GET - pobierz pojedynczą transakcję
 export async function GET(
@@ -62,9 +69,9 @@ export async function PATCH(
             )
         }
 
-        // POPRAWIONA KALKULACJA różnicy kwoty
-        const oldAmount = originalTransaction.amount
-        const newAmount = data.amount
+        // POPRAWIONA KALKULACJA różnicy kwoty z konwersją Decimal
+        const oldAmount = decimalToNumber(originalTransaction.amount) // KONWERSJA
+        const newAmount = data.amount // już jest number z JSON
         const amountDifference = oldAmount - newAmount
 
         // Przykłady:
@@ -75,7 +82,7 @@ export async function PATCH(
         const updatedTransaction = await prisma.transaction.update({
             where: { id: params.id },
             data: {
-                amount: newAmount,
+                amount: new Decimal(newAmount), // KONWERSJA z powrotem na Decimal
                 description: data.description || originalTransaction.description
             }
         })
@@ -87,26 +94,27 @@ export async function PATCH(
             })
 
             if (envelope) {
-                let newCurrentAmount = envelope.currentAmount
+                const currentAmount = decimalToNumber(envelope.currentAmount) // KONWERSJA
+                let newCurrentAmount = currentAmount
 
                 if (envelope.type === 'monthly') {
                     // KOPERTY MIESIĘCZNE:
                     // currentAmount = ile zostało w kopercie
                     // Dodatnia różnica = zwrot (dodaj do koperty)
                     // Ujemna różnica = dodatkowy wydatek (odejmij od koperty)
-                    newCurrentAmount = envelope.currentAmount + amountDifference
+                    newCurrentAmount = currentAmount + amountDifference
 
                 } else if (envelope.type === 'yearly') {
                     // KOPERTY ROCZNE:
                     // currentAmount = ile zebraliśmy/wydano
                     // Logika podobna - różnica wpływa na stan koperty
-                    newCurrentAmount = envelope.currentAmount + amountDifference
+                    newCurrentAmount = currentAmount + amountDifference
                 }
 
                 await prisma.envelope.update({
                     where: { id: originalTransaction.envelopeId },
                     data: {
-                        currentAmount: newCurrentAmount
+                        currentAmount: new Decimal(newCurrentAmount) // KONWERSJA z powrotem
                         // UWAGA: Może być ujemne (przekroczenie budżetu)
                     }
                 })
@@ -152,11 +160,14 @@ export async function DELETE(
             })
 
             if (envelope) {
+                const currentAmount = decimalToNumber(envelope.currentAmount) // KONWERSJA
+                const transactionAmount = decimalToNumber(transaction.amount) // KONWERSJA
+
                 await prisma.envelope.update({
                     where: { id: transaction.envelopeId },
                     data: {
                         // PRZYWRÓĆ PEŁNĄ KWOTĘ (dodaj z powrotem)
-                        currentAmount: envelope.currentAmount + transaction.amount
+                        currentAmount: new Decimal(currentAmount + transactionAmount) // KONWERSJA
                         // Dla miesięcznych: zwiększ dostępne środki
                         // Dla rocznych: zmniejsz wydane środki
                     }
