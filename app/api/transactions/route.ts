@@ -74,16 +74,25 @@ export async function POST(request: Request) {
             transactionDate.setSeconds(now.getSeconds())
         }
 
+        // ✅ NAPRAWKA: Ensure proper number types
+        const amount = Number(data.amount)
+        if (isNaN(amount) || amount <= 0) {
+            return NextResponse.json(
+                { error: 'Nieprawidłowa kwota' },
+                { status: 400 }
+            )
+        }
+
         // Utwórz transakcję
         const transaction = await prisma.transaction.create({
             data: {
                 userId: USER_ID,
                 type: data.type,
-                amount: data.amount,
+                amount: amount, // ✅ Ensure it's a number
                 description: data.description || '',
                 date: transactionDate,
                 envelopeId: data.envelopeId || null,
-                category: data.category || null // ✅ Może być null
+                category: data.category || null
             }
         })
 
@@ -94,6 +103,10 @@ export async function POST(request: Request) {
             })
 
             if (envelope) {
+                // ✅ NAPRAWKA: Explicit type casting to ensure numbers
+                const currentAmount = Number(envelope.currentAmount)
+                const transactionAmount = Number(amount)
+                
                 if (envelope.type === 'monthly') {
                     // KOPERTY MIESIĘCZNE:
                     // currentAmount = ile zostało do wydania
@@ -101,7 +114,7 @@ export async function POST(request: Request) {
                     await prisma.envelope.update({
                         where: { id: data.envelopeId },
                         data: {
-                            currentAmount: envelope.currentAmount - data.amount
+                            currentAmount: currentAmount - transactionAmount
                             // Może być ujemne (przekroczenie budżetu)
                         }
                     })
@@ -112,7 +125,7 @@ export async function POST(request: Request) {
                     await prisma.envelope.update({
                         where: { id: data.envelopeId },
                         data: {
-                            currentAmount: envelope.currentAmount - data.amount
+                            currentAmount: currentAmount - transactionAmount
                             // Dla wakacji: 420 - 100 = 320 pozostało
                             // Może być ujemne jeśli wydamy więcej niż zebrano
                         }
