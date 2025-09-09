@@ -27,8 +27,8 @@ model Envelope {
   name          String
   icon          String?
   type          String // 'monthly' lub 'yearly'
-  plannedAmount Int
-  currentAmount Int
+  plannedAmount Decimal
+  currentAmount Decimal
   transactions  Transaction[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
