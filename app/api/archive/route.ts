@@ -1,0 +1,153 @@
+// app/api/archive/route.ts - TYPESCRIPT FIXED VERSION
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/utils/prisma'
+
+const USER_ID = 'default-user'
+
+interface MonthData {
+    month: string
+    year: number
+    income: number
+    expenses: number
+    balance: number
+    categories: { [key: string]: number }
+    transactions: TransactionData[]
+}
+
+interface TransactionData {
+    id: string
+    type: string
+    amount: number
+    description: string
+    date: string
+    envelope: {
+        name: string
+        icon: string
+    } | null
+    category: string
+}
+
+export async function GET() {
+    try {
+        // Pobierz wszystkie transakcje (WYKLUCZAJĄC transfery przy zamykaniu miesiąca)
+        const allTransactions = await prisma.transaction.findMany({
+            where: {
+                userId: USER_ID,
+                type: { in: ['income', 'expense'] },
+                NOT: [
+                    {
+                        description: {
+                            contains: 'Zamknięcie miesiąca'
+                        }
+                    },
+                    {
+                        description: {
+                            contains: 'przeniesienie bilansu'
+                        }
+                    }
+                ]
+            },
+            include: {
+                envelope: true
+            },
+            orderBy: { date: 'desc' }
+        })
+
+        // Grupuj transakcje po miesiącach
+        const monthlyData: { [key: string]: MonthData } = {}
+
+        for (const transaction of allTransactions) {
+            const date = new Date(transaction.date)
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`
+            const monthName = date.toLocaleDateString('pl-PL', { month: 'long' })
+            const year = date.getFullYear()
+
+            if (!monthlyData[monthKey]) {
+                monthlyData[monthKey] = {
+                    month: monthName,
+                    year: year,
+                    income: 0,
+                    expenses: 0,
+                    balance: 0,
+                    categories: {},
+                    transactions: []
+                }
+            }
+
+            const monthData = monthlyData[monthKey]
+
+            // POPRAWIONA KATEGORYZACJA
+            let categoryName = 'Inne'
+
+            if (transaction.envelope?.name) {
+                // Jeśli ma kopertę, użyj nazwy koperty
+                categoryName = transaction.envelope.name
+            } else if (transaction.description) {
+                // Jeśli nie ma koperty, ale ma opis - spróbuj wykryć kategorię z opisu
+                const desc = transaction.description.toLowerCase()
+                if (desc.includes('transfer: konto wspólne')) {
+                    categoryName = 'Konto wspólne'
+                } else if (desc.includes('transfer: inwestycje')) {
+                    categoryName = 'Inwestycje'
+                } else if (desc.includes('transfer:')) {
+                    // Inne transfery pozostaną jako "Transfery"
+                    categoryName = 'Transfery'
+                }
+            }
+
+            // Dodaj transakcję do miesiąca
+            const transactionData: TransactionData = {
+                id: transaction.id,
+                type: transaction.type,
+                amount: transaction.amount,
+                description: transaction.description || 'Brak opisu',
+                date: transaction.date.toISOString(),
+                envelope: transaction.envelope ? {
+                    name: transaction.envelope.name,
+                    icon: transaction.envelope.icon || '📦'
+                } : null,
+                category: categoryName
+            }
+
+            monthData.transactions.push(transactionData)
+
+            // Aktualizuj sumy
+            if (transaction.type === 'income') {
+                monthData.income += transaction.amount
+            } else if (transaction.type === 'expense') {
+                monthData.expenses += transaction.amount
+
+                // Grupuj wydatki po kategoriach
+                if (!monthData.categories[categoryName]) {
+                    monthData.categories[categoryName] = 0
+                }
+                monthData.categories[categoryName] += transaction.amount
+            }
+        }
+
+        // Oblicz bilanse i posortuj transakcje w każdym miesiącu
+        Object.values(monthlyData).forEach((month: MonthData) => {
+            month.balance = month.income - month.expenses
+            month.transactions.sort((a: TransactionData, b: TransactionData) =>
+                new Date(b.date).getTime() - new Date(a.date).getTime()
+            )
+        })
+
+        // Konwertuj do array i posortuj po dacie (najnowsze pierwsze)
+        const result = Object.values(monthlyData).sort((a: MonthData, b: MonthData) => {
+            if (a.year !== b.year) return b.year - a.year
+            return new Date(`${a.month} 1, ${a.year}`).getTime() - new Date(`${b.month} 1, ${b.year}`).getTime()
+        })
+
+        console.log('Archive data with categories:', result[0]?.categories) // Debug
+
+        return NextResponse.json(result)
+
+    } catch (error) {
+        console.error('Archive API error:', error)
+        return NextResponse.json(
+            { error: 'Błąd pobierania archiwum' },
+            { status: 500 }
+        )
+    }
+}
