@@ -1,15 +1,22 @@
-// app/api/dashboard/route.ts - Z OBSŁUGĄ ZAMKNIĘTEGO MIESIĄCA
+// app/api/dashboard/route.ts - KOMPLETNY z obsługą Decimal
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/utils/prisma'
 import { initializeUserData } from '@/lib/db/seed'
+import { Decimal } from '@prisma/client/runtime/library'
 
 const USER_ID = 'default-user'
+
+// Funkcja pomocnicza do konwersji Decimal na number
+function decimalToNumber(decimal: Decimal | number): number {
+    if (typeof decimal === 'number') return decimal
+    return decimal.toNumber()
+}
 
 interface Transaction {
     id: string
     userId: string
     type: string
-    amount: number
+    amount: Decimal
     description: string | null
     date: Date
     envelopeId: string | null
@@ -61,18 +68,18 @@ export async function GET() {
             }
         })
 
-        // Oblicz rzeczywiste saldo konta głównego
+        // Oblicz rzeczywiste saldo konta głównego z konwersją Decimal
         const totalAllIncome = allTransactions
             .filter(t => t.type === 'income')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
         const totalAllExpenses = allTransactions
             .filter(t => t.type === 'expense')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
         const balance = totalAllIncome - totalAllExpenses
 
-        // ✅ SPRAWDŹ CZY MIESIĄC ZOSTAŁ ZAMKNIĘTY
+        // SPRAWDŹ CZY MIESIĄC ZOSTAŁ ZAMKNIĘTY
         const now = new Date()
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
         const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
@@ -91,7 +98,7 @@ export async function GET() {
             }
         })
 
-        // ✅ POPRAWKA: Pobierz transakcje z bieżącego miesiąca
+        // POPRAWKA: Pobierz transakcje z bieżącego miesiąca
         let monthTransactions: Transaction[] = []
 
         if (monthCloseTransaction) {
@@ -130,16 +137,16 @@ export async function GET() {
             })
         }
 
-        // Oblicz statystyki miesięczne
+        // Oblicz statystyki miesięczne z konwersją Decimal
         const totalIncome = monthTransactions
             .filter(t => t.type === 'income')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
         const totalExpenses = monthTransactions
             .filter(t => t.type === 'expense')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
-        // ✅ DEBUG - sprawdź co się dzieje
+        // DEBUG - sprawdź co się dzieje
         console.log('=== DASHBOARD DEBUG ===')
         console.log('Month close transaction:', monthCloseTransaction ? 'EXISTS' : 'NONE')
         console.log('Month transactions count:', monthTransactions.length)
@@ -162,14 +169,17 @@ export async function GET() {
         const monthlyEnvelopes = envelopes
             .filter(e => e.type === 'monthly')
             .map(e => {
+                // KONWERSJA Decimal na number dla wszystkich operacji
+                const plannedAmount = decimalToNumber(e.plannedAmount)
+                const currentAmount = decimalToNumber(e.currentAmount)
                 let spent = 0
 
-                if (e.currentAmount < 0) {
-                    spent = e.plannedAmount + Math.abs(e.currentAmount)
-                } else if (e.currentAmount >= e.plannedAmount) {
+                if (currentAmount < 0) {
+                    spent = plannedAmount + Math.abs(currentAmount)
+                } else if (currentAmount >= plannedAmount) {
                     spent = 0
                 } else {
-                    spent = e.plannedAmount - e.currentAmount
+                    spent = plannedAmount - currentAmount
                 }
 
                 return {
@@ -177,8 +187,8 @@ export async function GET() {
                     name: e.name,
                     icon: e.icon,
                     spent: spent,
-                    planned: e.plannedAmount,
-                    current: e.currentAmount,
+                    planned: plannedAmount,
+                    current: currentAmount,
                     activityCount: envelopeActivity[e.id] || 0
                 }
             })
@@ -195,9 +205,9 @@ export async function GET() {
                 id: e.id,
                 name: e.name,
                 icon: e.icon,
-                spent: e.currentAmount,
-                planned: e.plannedAmount,
-                current: e.currentAmount
+                spent: decimalToNumber(e.currentAmount), // KONWERSJA Decimal
+                planned: decimalToNumber(e.plannedAmount), // KONWERSJA Decimal
+                current: decimalToNumber(e.currentAmount) // KONWERSJA Decimal
             }))
             .sort((a, b) => a.name.localeCompare(b.name))
 
@@ -208,7 +218,7 @@ export async function GET() {
             monthlyEnvelopes,
             yearlyEnvelopes,
             transactions: monthTransactions.slice(0, 10),
-            isMonthClosed // ✅ DODANA INFORMACJA O STANIE MIESIĄCA
+            isMonthClosed // INFORMACJA O STANIE MIESIĄCA
         })
 
     } catch (error) {
