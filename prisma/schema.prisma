@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,41 +11,41 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
   envelopes    Envelope[]
   transactions Transaction[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Envelope {
-  id            String   @id @default(cuid())
+  id            String        @id @default(cuid())
   userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String
-  type          String   // 'monthly' lub 'yearly'
-  plannedAmount Float
-  currentAmount Float
   icon          String?
-  
-  user         User          @relation(fields: [userId], references: [id])
-  transactions Transaction[]
+  type          String // 'monthly' lub 'yearly'
+  plannedAmount Int
+  currentAmount Int
+  transactions  Transaction[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  type        String   // income, expense, transfer
-  amount      Float
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String // 'income', 'expense', 'transfer'
+  amount      Int
   description String?
   date        DateTime
   envelopeId  String?
-  category    String?  // ID kategorii (nowe pole!)
-  editHistory Json     @default("[]")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  user        User      @relation(fields: [userId], references: [id])
   envelope    Envelope? @relation(fields: [envelopeId], references: [id])
+  category    String?  // ID kategorii
+  editHistory String?   @default("") // NAPRAWIONE: String zamiast Json
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
