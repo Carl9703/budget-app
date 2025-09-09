@@ -39,7 +39,7 @@ model Transaction {
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        String // 'income', 'expense', 'transfer'
-  amount      Int
+  amount Decimal
   description String?
   date        DateTime
   envelopeId  String?
