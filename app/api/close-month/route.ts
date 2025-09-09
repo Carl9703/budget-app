@@ -1,33 +1,54 @@
-// app/api/close-month/route.ts - OPCJA A: Przenoś tylko bilans miesiąca
+// app/api/close-month/route.ts - NAPRAWIONY dla Decimal
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/utils/prisma'
+import { Decimal } from '@prisma/client/runtime/library'
 
 const USER_ID = 'default-user'
+
+// Funkcja pomocnicza do konwersji Decimal na number
+function decimalToNumber(decimal: Decimal | number): number {
+    if (typeof decimal === 'number') return decimal
+    return decimal.toNumber()
+}
 
 export async function POST() {
     try {
         const now = new Date()
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
 
-        // Pobierz transakcje z bieżącego miesiąca (wykluczając operacje zamknięcia)
+        // SPRAWDŹ CZY MIESIĄC JUŻ BYŁ ZAMKNIĘTY
+        const existingCloseTransaction = await prisma.transaction.findFirst({
+            where: {
+                userId: USER_ID,
+                description: {
+                    contains: 'Zamknięcie miesiąca'
+                },
+                date: {
+                    gte: startOfMonth,
+                    lte: endOfMonth
+                }
+            }
+        })
+
+        if (existingCloseTransaction) {
+            return NextResponse.json(
+                { 
+                    error: 'Miesiąc już został zamknięty',
+                    details: `Zamknięcie wykonano: ${existingCloseTransaction.date.toLocaleDateString('pl-PL')}`
+                },
+                { status: 400 }
+            )
+        }
+
+        // Pobierz transakcje z bieżącego miesiąca
         const monthTransactions = await prisma.transaction.findMany({
             where: {
                 userId: USER_ID,
                 date: {
-                    gte: startOfMonth
-                },
-                NOT: [
-                    {
-                        description: {
-                            contains: 'Zamknięcie miesiąca'
-                        }
-                    },
-                    {
-                        description: {
-                            contains: 'przeniesienie bilansu'
-                        }
-                    }
-                ]
+                    gte: startOfMonth,
+                    lte: endOfMonth
+                }
             }
         })
 
@@ -36,11 +57,11 @@ export async function POST() {
         // Oblicz FAKTYCZNY bilans miesiąca (przychody - wydatki)
         const totalIncome = monthTransactions
             .filter(t => t.type === 'income')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
         const totalExpenses = monthTransactions
             .filter(t => t.type === 'expense')
-            .reduce((sum, t) => sum + t.amount, 0)
+            .reduce((sum, t) => sum + decimalToNumber(t.amount), 0) // KONWERSJA Decimal
 
         const monthBalance = totalIncome - totalExpenses
 
@@ -61,18 +82,19 @@ export async function POST() {
         let totalUnusedFunds = 0
 
         for (const envelope of monthlyEnvelopes) {
-            if (envelope.currentAmount > 0) {
-                totalUnusedFunds += envelope.currentAmount
+            const currentAmount = decimalToNumber(envelope.currentAmount) // KONWERSJA
+            if (currentAmount > 0) {
+                totalUnusedFunds += currentAmount
                 envelopeDetails.push({
                     name: envelope.name,
                     icon: envelope.icon,
-                    remaining: envelope.currentAmount
+                    remaining: currentAmount
                 })
-            } else if (envelope.currentAmount < 0) {
+            } else if (currentAmount < 0) {
                 envelopeDetails.push({
                     name: envelope.name,
                     icon: envelope.icon,
-                    overrun: Math.abs(envelope.currentAmount)
+                    overrun: Math.abs(currentAmount)
                 })
             }
         }
@@ -97,25 +119,38 @@ export async function POST() {
             if (freedomEnvelope) {
                 console.log(`Transferring BALANCE ${totalToTransfer} to freedom envelope`)
 
+                const currentFreedomAmount = decimalToNumber(freedomEnvelope.currentAmount)
+                
                 await prisma.envelope.update({
                     where: { id: freedomEnvelope.id },
                     data: {
-                        currentAmount: freedomEnvelope.currentAmount + totalToTransfer
+                        currentAmount: new Decimal(currentFreedomAmount + totalToTransfer) // Konwersja z powrotem na Decimal
                     }
                 })
 
-                // Utwórz transakcję księgową dla równowagi
+                // UTWÓRZ TRANSAKCJĘ ZAMKNIĘCIA Z UNIKALNYM OPISEM
                 await prisma.transaction.create({
                     data: {
                         userId: USER_ID,
                         type: 'expense',
-                        amount: totalToTransfer,
-                        description: '💰 Zamknięcie miesiąca - przeniesienie bilansu',
+                        amount: new Decimal(totalToTransfer), // Konwersja na Decimal
+                        description: `💰 Zamknięcie miesiąca ${now.toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' })} - przeniesienie bilansu`,
                         date: now,
                         envelopeId: freedomEnvelope.id
                     }
                 })
             }
+        } else {
+            // NAWET PRZY DEFICYCIE UTWÓRZ TRANSAKCJĘ ZAMKNIĘCIA
+            await prisma.transaction.create({
+                data: {
+                    userId: USER_ID,
+                    type: 'expense',
+                    amount: new Decimal(0), // 0 jako Decimal
+                    description: `🔒 Zamknięcie miesiąca ${now.toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' })} - deficyt ${Math.abs(totalToTransfer)} zł`,
+                    date: now
+                }
+            })
         }
 
         // Reset wszystkich kopert miesięcznych do 0
@@ -123,7 +158,7 @@ export async function POST() {
             await prisma.envelope.update({
                 where: { id: envelope.id },
                 data: {
-                    currentAmount: 0
+                    currentAmount: new Decimal(0) // 0 jako Decimal
                 }
             })
         }
